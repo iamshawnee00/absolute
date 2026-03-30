@@ -339,78 +339,110 @@ export default function NewClaimPage() {
               </button>
             </div>
           </div>
-        </form>
 
-        {/* RECEIPT UPLOAD MODAL */}
-        {activeModalItemId !== null && activeModalItem && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-              
-              <div className="flex items-center justify-between p-4 bg-slate-50 border-b border-slate-100">
-                <h3 className="font-bold text-lg flex items-center gap-2">
-                  <FileText className="text-blue-600" size={20} /> 
-                  Attach Receipt <span className="text-slate-400 text-sm font-normal">(Row {items.findIndex(i => i.id === activeModalItemId) + 1})</span>
-                </h3>
-                <button onClick={() => setActiveModalItemId(null)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* RECEIPT UPLOAD MODAL */}
+          {activeModalItemId !== null && activeModalItem && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                 
-                <div className="space-y-4">
-                  <label className="text-sm font-semibold text-slate-700 flex justify-between">
-                    Original Receipt <span className="text-red-500 font-normal text-xs">*Required</span>
-                  </label>
-                  <FileUploadZone file={activeModalItem.receiptFile} onFileSelect={(f: File | null) => updateItem(activeModalItem.id, 'receiptFile', f)} />
+                <div className="flex items-center justify-between p-4 bg-slate-50 border-b border-slate-100">
+                  <h3 className="font-bold text-lg flex items-center gap-2">
+                    <FileText className="text-blue-600" size={20} /> 
+                    Attach Receipt <span className="text-slate-400 text-sm font-normal">(Row {items.findIndex(i => i.id === activeModalItemId) + 1})</span>
+                  </h3>
+                  {/* FIX 1: Added type="button" to prevent accidental form submission */}
+                  <button type="button" onClick={() => setActiveModalItemId(null)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
                   
-                  <div className="pt-4 border-t border-slate-100">
-                    <label className="flex items-center gap-3 cursor-pointer p-3 bg-amber-50 rounded-lg border border-amber-100 hover:bg-amber-100/50 transition-colors">
-                      <input type="checkbox" className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 cursor-pointer" checked={activeModalItem.isForeign} onChange={(e) => updateItem(activeModalItem.id, 'isForeign', e.target.checked)} />
-                      <span className="font-semibold text-amber-900 text-sm">Foreign Currency Expense</span>
+                  <div className="space-y-4">
+                    <label className="text-sm font-semibold text-slate-700 flex justify-between">
+                      Original Receipt <span className="text-red-500 font-normal text-xs">*Required</span>
                     </label>
-                  </div>
-                  
-                  {activeModalItem.isForeign && (
-                    <div className="animate-in fade-in slide-in-from-top-2 space-y-3 mt-4">
-                      <label className="text-sm font-semibold text-slate-700">Bank Conversion Proof</label>
-                      <FileUploadZone file={activeModalItem.conversionFile} onFileSelect={(f: File | null) => updateItem(activeModalItem.id, 'conversionFile', f)} compact={true} />
+                    <FileUploadZone file={activeModalItem.receiptFile} onFileSelect={(f: File | null) => updateItem(activeModalItem.id, 'receiptFile', f)} />
+                    
+                    <div className="pt-4 border-t border-slate-100">
+                      <label className="flex items-center gap-3 cursor-pointer p-3 bg-amber-50 rounded-lg border border-amber-100 hover:bg-amber-100/50 transition-colors">
+                        <input type="checkbox" className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500 cursor-pointer" checked={activeModalItem.isForeign} onChange={(e) => updateItem(activeModalItem.id, 'isForeign', e.target.checked)} />
+                        <span className="font-semibold text-amber-900 text-sm">Foreign Currency Expense</span>
+                      </label>
                     </div>
-                  )}
-                </div>
+                    
+                    {activeModalItem.isForeign && (
+                      <div className="animate-in fade-in slide-in-from-top-2 space-y-4 mt-4">
+                        
+                        <div className="grid grid-cols-2 gap-4 bg-amber-50 p-4 rounded-xl border border-amber-200">
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-amber-800 uppercase tracking-wider">Orig. Currency</label>
+                            <select 
+                              className="w-full p-2.5 bg-white border border-amber-200 rounded-lg outline-none text-sm text-slate-900 font-medium"
+                              value={activeModalItem.originalCurrency} 
+                              onChange={e => updateItem(activeModalItem.id, 'originalCurrency', e.target.value)}
+                            >
+                              <option value="USD">USD - US Dollar</option>
+                              <option value="SGD">SGD - Sing Dollar</option>
+                              <option value="EUR">EUR - Euro</option>
+                              <option value="GBP">GBP - British Pound</option>
+                              <option value="AUD">AUD - Aus Dollar</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold text-amber-800 uppercase tracking-wider">Orig. Amount</label>
+                            <input 
+                              type="number" step="0.01" placeholder="0.00"
+                              className="w-full p-2.5 bg-white border border-amber-200 rounded-lg outline-none text-sm text-slate-900 font-medium"
+                              value={activeModalItem.originalAmount} 
+                              onChange={e => updateItem(activeModalItem.id, 'originalAmount', e.target.value)}
+                            />
+                          </div>
+                        </div>
 
-                <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 h-fit">
-                  <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Verify Row Details</h4>
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <label className="text-xs font-semibold text-slate-600 block mb-1">Receipt No.</label>
-                      <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" value={activeModalItem.receiptNo} onChange={e => updateItem(activeModalItem.id, 'receiptNo', e.target.value)} />
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-slate-600 block mb-1">Vendor</label>
-                      <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" value={activeModalItem.vendor} onChange={e => updateItem(activeModalItem.id, 'vendor', e.target.value)} />
-                    </div>
+                        <div>
+                          <label className="text-sm font-semibold text-slate-700 block mb-2">Bank Conversion Proof / Statement</label>
+                          <FileUploadZone file={activeModalItem.conversionFile} onFileSelect={(f: File | null) => updateItem(activeModalItem.id, 'conversionFile', f)} compact={true} />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-800 block mb-1">Final Amount (MYR)</label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-medium">MYR</span>
-                      <input 
-                        type="number" step="0.01" className="w-full pl-12 p-3 border-2 border-slate-300 rounded-lg focus:border-blue-500 outline-none font-bold text-xl text-slate-900" 
-                        value={activeModalItem.amount} 
-                        onChange={e => updateItem(activeModalItem.id, 'amount', e.target.value)} 
-                      />
-                    </div>
-                  </div>
-                </div>
 
-              </div>
-              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-                <button onClick={() => setActiveModalItemId(null)} className="bg-slate-900 text-white px-8 py-2.5 rounded-lg font-bold hover:bg-slate-800 shadow-sm">
-                  Save & Close
-                </button>
+                  <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 h-fit">
+                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Verify Row Details</h4>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Receipt No.</label>
+                        <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" value={activeModalItem.receiptNo} onChange={e => updateItem(activeModalItem.id, 'receiptNo', e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Vendor</label>
+                        <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" value={activeModalItem.vendor} onChange={e => updateItem(activeModalItem.id, 'vendor', e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 block mb-1">Final Amount (MYR)</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-medium">MYR</span>
+                        <input 
+                          type="number" step="0.01" className="w-full pl-12 p-3 border-2 border-slate-300 rounded-lg focus:border-blue-500 outline-none font-bold text-xl text-slate-900" 
+                          value={activeModalItem.amount} 
+                          onChange={e => updateItem(activeModalItem.id, 'amount', e.target.value)} 
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                  {/* FIX 2: Added type="button" here as well! */}
+                  <button type="button" onClick={() => setActiveModalItemId(null)} className="bg-slate-900 text-white px-8 py-2.5 rounded-lg font-bold hover:bg-slate-800 shadow-sm">
+                    Save & Close
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+
+        </form>
       </main>
     </div>
   );

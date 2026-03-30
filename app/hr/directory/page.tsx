@@ -4,10 +4,11 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
-  Building, LogOut, ArrowLeft, Search, Plus, 
+  ArrowLeft, Search, Plus, 
   Edit, Trash2, ShieldAlert, Loader2, X, BadgeInfo,
   CheckCircle2, User
 } from 'lucide-react';
+import Navbar from '@/components/Navbar';
 
 // Wrapper to handle Next.js useSearchParams properly
 export default function DirectoryPage() {
@@ -24,7 +25,6 @@ function EmployeeDirectory() {
   const searchParams = useSearchParams();
   const targetEditUserId = searchParams.get('editUser');
 
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const [profiles, setProfiles] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +36,7 @@ function EmployeeDirectory() {
 
   useEffect(() => {
     fetchData();
-  }, [targetEditUserId]); // Re-run if the URL param changes
+  }, [targetEditUserId]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -45,7 +45,6 @@ function EmployeeDirectory() {
       router.push('/login');
       return;
     }
-    setCurrentUser(session.user);
 
     // Fetch all profiles and departments
     const [profilesRes, deptsRes] = await Promise.all([
@@ -59,7 +58,7 @@ function EmployeeDirectory() {
       setProfiles(profilesRes.data);
       
       // AUTO-OPEN MODAL LOGIC:
-      // If we came from a notification, find that user and open the modal instantly
+      // If we came from a notification (?editUser=ID), find that user and open the modal
       if (targetEditUserId) {
         const userToEdit = profilesRes.data.find(p => p.id === targetEditUserId);
         if (userToEdit) {
@@ -80,7 +79,7 @@ function EmployeeDirectory() {
       .from('profiles')
       .update({
         full_name: editingProfile.full_name,
-        designation: editingProfile.designation, // <-- Added Designation
+        designation: editingProfile.designation,
         staff_id: editingProfile.staff_id,
         role: editingProfile.role,
         department_id: editingProfile.department_id
@@ -90,10 +89,11 @@ function EmployeeDirectory() {
     if (error) {
       alert("Error updating profile: " + error.message);
     } else {
-      // Refresh the list locally to show updates immediately
+      // Refresh local state
+      const deptName = departments.find(d => d.id === editingProfile.department_id)?.name;
       setProfiles(profiles.map(p => p.id === editingProfile.id ? { 
         ...editingProfile, 
-        departments: { name: departments.find(d => d.id === editingProfile.department_id)?.name } 
+        departments: { name: deptName } 
       } : p));
       setEditingProfile(null);
     }
@@ -103,7 +103,6 @@ function EmployeeDirectory() {
   const handleDeleteProfile = async (id: string, name: string) => {
     if (!confirm(`Are you sure you want to remove ${name}? This will revoke their app access.`)) return;
     
-    // Note: This deletes the profile row. (Deleting auth.users requires backend admin rights).
     const { error } = await supabase.from('profiles').delete().eq('id', id);
     if (error) {
       alert("Error deleting profile: " + error.message);
@@ -112,7 +111,6 @@ function EmployeeDirectory() {
     }
   };
 
-  // Filter list based on search bar (now includes designation)
   const filteredProfiles = profiles.filter(p => 
     (p.full_name?.toLowerCase().includes(searchQuery.toLowerCase())) ||
     (p.email?.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -124,7 +122,7 @@ function EmployeeDirectory() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
-      <Navbar onSignOut={() => { supabase.auth.signOut(); router.push('/login'); }} />
+      <Navbar />
       
       <main className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 animate-in fade-in slide-in-from-right-8">
         <button onClick={() => router.push('/dashboard')} className="text-slate-500 hover:text-blue-600 flex items-center gap-2 text-sm font-medium mb-6 transition-colors">
@@ -136,13 +134,16 @@ function EmployeeDirectory() {
             <h1 className="text-3xl font-bold text-slate-900">Employee Directory</h1>
             <p className="text-slate-500 mt-1">Manage staff profiles, roles, and access permissions.</p>
           </div>
-          <button className="bg-slate-900 text-white px-5 py-2.5 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-sm">
+          <button 
+            onClick={() => router.push('/hr/directory/add')}
+            className="bg-slate-900 text-white px-5 py-2.5 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-800 transition-colors shadow-sm"
+          >
             <Plus size={18} /> Add Employee
           </button>
         </div>
 
         {/* CONTROLS */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex flex-col sm:flex-row gap-4">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
@@ -162,9 +163,9 @@ function EmployeeDirectory() {
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-widest font-bold">
                 <tr>
                   <th className="px-6 py-4">Employee</th>
-                  <th className="px-6 py-4">Designation</th>
-                  <th className="px-6 py-4">Staff ID</th>
-                  <th className="px-6 py-4">Department & Role</th>
+                  <th className="px-6 py-4 text-center">Designation</th>
+                  <th className="px-6 py-4 text-center">Staff ID</th>
+                  <th className="px-6 py-4 text-center">Department & Role</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -182,28 +183,28 @@ function EmployeeDirectory() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 text-center">
                       {p.designation ? (
                         <span className="font-semibold text-slate-700">{p.designation}</span>
                       ) : (
                         <span className="text-slate-400 text-xs italic">Unassigned</span>
                       )}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 text-center">
                       {p.staff_id ? (
                         <span className="font-medium text-slate-700">{p.staff_id}</span>
                       ) : (
                         <span className="text-slate-400 text-xs italic">Unassigned</span>
                       )}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-6 py-4 text-center">
                       <div className="font-semibold text-slate-800">{p.departments?.name || 'No Dept'}</div>
                       <div className="mt-1">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          p.role === 'superadmin' ? 'bg-purple-100 text-purple-700' :
-                          p.role === 'hod' ? 'bg-blue-100 text-blue-700' :
-                          p.role === 'manager' ? 'bg-amber-100 text-amber-700' :
-                          'bg-slate-100 text-slate-600'
+                          p.role === 'superadmin' ? 'bg-purple-100 text-purple-700 border border-purple-200' :
+                          p.role === 'hod' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                          p.role === 'manager' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                          'bg-slate-100 text-slate-600 border border-slate-200'
                         }`}>
                           {p.role}
                         </span>
@@ -211,10 +212,10 @@ function EmployeeDirectory() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setEditingProfile({...p})} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors tooltip" title="Edit User">
+                        <button onClick={() => setEditingProfile({...p})} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit User">
                           <Edit size={18} />
                         </button>
-                        <button onClick={() => handleDeleteProfile(p.id, p.full_name)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors tooltip" title="Revoke Access">
+                        <button onClick={() => handleDeleteProfile(p.id, p.full_name)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Revoke Access">
                           <Trash2 size={18} />
                         </button>
                       </div>
@@ -222,7 +223,7 @@ function EmployeeDirectory() {
                   </tr>
                 ))}
                 {filteredProfiles.length === 0 && (
-                  <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">No employees found.</td></tr>
+                  <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">No employees found matching your search.</td></tr>
                 )}
               </tbody>
             </table>
@@ -245,32 +246,31 @@ function EmployeeDirectory() {
             <form onSubmit={handleSaveProfile} className="p-6 space-y-6">
               <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-lg border border-blue-100 flex items-start gap-2">
                 <BadgeInfo size={16} className="mt-0.5 shrink-0 text-blue-600" />
-                <p>Editing profile for <strong>{editingProfile.email}</strong>. Assigning HOD or Manager roles grants them access to approve claims for their selected department.</p>
+                <p>Editing profile for <strong>{editingProfile.email}</strong>. Changes to roles or departments will update their workspace access immediately.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1.5">
                   <label className="text-sm font-semibold text-slate-700">Full Name</label>
-                  <input required type="text" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500"
+                  <input required type="text" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all"
                     value={editingProfile.full_name || ''} onChange={e => setEditingProfile({...editingProfile, full_name: e.target.value})} />
                 </div>
 
-                {/* NEW FIELD: DESIGNATION */}
                 <div className="space-y-1.5">
                   <label className="text-sm font-semibold text-slate-700">Designation / Job Title</label>
-                  <input type="text" placeholder="e.g. Graphic Designer" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500"
+                  <input type="text" placeholder="e.g. Graphic Designer" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all"
                     value={editingProfile.designation || ''} onChange={e => setEditingProfile({...editingProfile, designation: e.target.value})} />
                 </div>
                 
                 <div className="space-y-1.5">
                   <label className="text-sm font-semibold text-slate-700">Staff ID</label>
-                  <input type="text" placeholder="e.g. EMP-001" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500"
+                  <input type="text" placeholder="e.g. EMP-001" className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all"
                     value={editingProfile.staff_id || ''} onChange={e => setEditingProfile({...editingProfile, staff_id: e.target.value})} />
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="text-sm font-semibold text-slate-700">Department Assignment</label>
-                  <select required className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 bg-white"
+                  <select required className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all bg-white"
                     value={editingProfile.department_id || ''} onChange={e => setEditingProfile({...editingProfile, department_id: e.target.value})}>
                     <option value="" disabled>Select Department</option>
                     {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -279,7 +279,7 @@ function EmployeeDirectory() {
 
                 <div className="space-y-1.5 md:col-span-2">
                   <label className="text-sm font-semibold text-slate-700">Access Role</label>
-                  <select required className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 bg-white"
+                  <select required className="w-full p-2.5 border border-slate-300 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 transition-all bg-white"
                     value={editingProfile.role || 'staff'} onChange={e => setEditingProfile({...editingProfile, role: e.target.value})}>
                     <option value="staff">Staff (Basic Access)</option>
                     <option value="manager">Manager (Approve Team)</option>
@@ -293,7 +293,7 @@ function EmployeeDirectory() {
                 <button type="button" onClick={() => setEditingProfile(null)} className="px-5 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-lg transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={isSaving} className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-70">
+                <button type="submit" disabled={isSaving} className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-sm disabled:opacity-70">
                   {isSaving ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle2 size={18} />}
                   Save Changes
                 </button>
@@ -304,22 +304,5 @@ function EmployeeDirectory() {
       )}
 
     </div>
-  );
-}
-
-// Simple stripped down Navbar just for the directory
-function Navbar({ onSignOut }: any) {
-  return (
-    <nav className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="bg-slate-900 text-white p-2 rounded-lg"><Building size={20} /></div>
-          <span className="font-bold text-lg tracking-tight">Agency OS</span>
-        </div>
-        <button onClick={onSignOut} className="text-slate-400 hover:text-red-600 flex items-center gap-1.5 p-2 rounded-md hover:bg-red-50 transition-colors font-bold">
-          <LogOut size={18} /> <span className="text-xs uppercase tracking-wider">Sign Out</span>
-        </button>
-      </div>
-    </nav>
   );
 }

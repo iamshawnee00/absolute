@@ -4,9 +4,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { 
-  Building, LogOut, ArrowLeft, FileText, Plus, 
-  Trash2, CheckCircle2, Image as ImageIcon, X, Upload, ChevronRight, Loader2, File as FileIcon, ChevronDown, Check
+  ArrowLeft, FileText, Plus, 
+  Trash2, CheckCircle2, Image as ImageIcon, X, Upload, ChevronRight, Loader2, File as FileIcon
 } from 'lucide-react';
+import Navbar from '@/components/Navbar';
 
 // --- TYPES & INTERFACES ---
 interface Company {
@@ -39,17 +40,11 @@ export default function NewClaimPage() {
   
   // --- AUTH & ROLES ---
   const [user, setUser] = useState<any>(null);
-  const [userRole, setUserRole] = useState<'staff' | 'manager' | 'hod' | 'superadmin'>('staff');
   const [isInitializing, setIsInitializing] = useState(true);
   
   // --- MASTER DATA ---
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([
-    { id: 'all', name: 'Agency OS (All)' },
-    { id: 'marketing', name: 'Marketing' },
-    { id: 'finance', name: 'Finance' },
-    { id: 'operations', name: 'Operations' }
-  ]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   
   // --- APP STATE ---
   const [activeDepartment, setActiveDepartment] = useState('all');
@@ -79,22 +74,22 @@ export default function NewClaimPage() {
       setUser(session.user);
 
       try {
-        // 1. Fetch User Profile & Role
+        // Fetch User Profile for Initial Department
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role, department_id')
+          .select('department_id')
           .eq('id', session.user.id)
           .maybeSingle();
           
-        if (profile?.role) setUserRole(profile.role as any);
+        if (profile?.department_id) setActiveDepartment(profile.department_id);
         
-        // 2. Fetch Companies (Entities)
+        // Fetch Companies (Entities)
         const { data: companiesData } = await supabase.from('companies').select('id, name');
         if (companiesData) setCompanies(companiesData);
 
-        // 3. Fetch Departments
-        const { data: deptData } = await supabase.from('departments').select('id, name');
-        if (deptData && deptData.length > 0) {
+        // Fetch Departments for Switcher
+        const { data: deptData } = await supabase.from('departments').select('id, name').order('name');
+        if (deptData) {
           setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...deptData]);
         }
       } catch (error) {
@@ -127,7 +122,6 @@ export default function NewClaimPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 1. Validation
     if (!formData.companyId || !formData.purpose) { 
       alert("Please fill in all header details."); 
       return; 
@@ -142,16 +136,7 @@ export default function NewClaimPage() {
     setIsSubmitting(true);
 
     try {
-      // 2. Defensive Profile Check (Ensures Foreign Key constraints pass)
-      const { data: profileCheck } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle();
-      if (!profileCheck) {
-        await supabase.from('profiles').insert({ 
-          id: user.id, email: user.email, role: 'staff' 
-        });
-      }
-
-      // 3. Insert Claim Header
-      // IMPORTANT: We bind the claim to the active workspace/department!
+      // 1. Insert Claim Header
       const { data: claimData, error: claimError } = await supabase.from('claims').insert({
         user_id: user.id, 
         company_id: formData.companyId, 
@@ -164,9 +149,8 @@ export default function NewClaimPage() {
 
       if (claimError) throw new Error(`Claim header error: ${claimError.message}`);
 
-      // 4. Insert Line Items & Upload Receipts
+      // 2. Insert Line Items & Upload Receipts
       for (const item of validItems) {
-        // Insert DB Row
         const { data: itemData, error: itemError } = await supabase.from('claim_items').insert({
           claim_id: claimData.id, 
           expense_date: item.date || new Date().toISOString().split('T')[0],
@@ -182,11 +166,9 @@ export default function NewClaimPage() {
 
         if (itemError) throw new Error(`Item insertion error: ${itemError.message}`);
 
-        // Handle File Uploads (Storage)
         const uploadFile = async (file: File, fileType: string) => {
           if (!file) return;
           const fileExt = file.name.split('.').pop();
-          // Generate secure, unique path
           const filePath = `${user.id}/${claimData.id}/${itemData.id}_${fileType.replace(/\s+/g, '')}.${fileExt}`;
           
           const { error: uploadError } = await supabase.storage.from('receipts').upload(filePath, file);
@@ -205,7 +187,6 @@ export default function NewClaimPage() {
         if (item.conversionFile) await uploadFile(item.conversionFile, 'Conversion Proof');
       }
       
-      // 5. Success! Redirect to Dashboard
       router.push('/claims'); 
     } catch (error: any) {
       console.error("Submission failed:", error);
@@ -228,13 +209,12 @@ export default function NewClaimPage() {
   return (
     <div className="min-h-screen bg-slate-50 pb-24 text-slate-900 font-sans">
       <Navbar 
-        user={user} 
-        role={userRole} 
+        showSwitcher={true}
         departments={departments}
         activeDepartment={activeDepartment}
         onDepartmentChange={setActiveDepartment}
-        onSignOut={() => { supabase.auth.signOut(); router.push('/login'); }} 
       />
+      
       <main className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 animate-in fade-in slide-in-from-right-8">
         
         <button onClick={() => router.push('/claims')} className="text-slate-500 hover:text-blue-600 flex items-center gap-2 text-sm font-medium mb-6 transition-colors">
@@ -303,27 +283,27 @@ export default function NewClaimPage() {
                   {items.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50/50 group transition-colors">
                       <td className="p-0 border-r border-slate-100">
-                        <input type="date" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium placeholder:text-slate-400" value={item.date} onChange={e => updateItem(item.id, 'date', e.target.value)} />
+                        <input type="date" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.date} onChange={e => updateItem(item.id, 'date', e.target.value)} />
                       </td>
                       <td className="p-0 border-r border-slate-100">
-                        <input type="text" placeholder="INV-001" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium placeholder:text-slate-400" value={item.receiptNo} onChange={e => updateItem(item.id, 'receiptNo', e.target.value)} />
+                        <input type="text" placeholder="INV-001" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.receiptNo} onChange={e => updateItem(item.id, 'receiptNo', e.target.value)} />
                       </td>
                       <td className="p-0 border-r border-slate-100">
-                        <input type="text" placeholder="Vendor Name" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium placeholder:text-slate-400" value={item.vendor} onChange={e => updateItem(item.id, 'vendor', e.target.value)} />
+                        <input type="text" placeholder="Vendor Name" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.vendor} onChange={e => updateItem(item.id, 'vendor', e.target.value)} />
                       </td>
                       <td className="p-0 border-r border-slate-100">
-                        <input type="text" placeholder="Optional notes" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium placeholder:text-slate-400" value={item.remarks} onChange={e => updateItem(item.id, 'remarks', e.target.value)} />
+                        <input type="text" placeholder="Optional notes" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.remarks} onChange={e => updateItem(item.id, 'remarks', e.target.value)} />
                       </td>
                       <td className="p-0 border-r border-slate-100">
-                        <input type="number" step="0.01" placeholder="0.00" className={`w-full p-3 bg-transparent outline-none font-bold placeholder:text-slate-400 ${item.isForeign ? 'text-amber-600 bg-amber-50/30' : 'text-slate-900'}`} value={item.amount} onChange={e => updateItem(item.id, 'amount', e.target.value)} />
+                        <input type="number" step="0.01" placeholder="0.00" className={`w-full p-3 bg-transparent outline-none font-bold ${item.isForeign ? 'text-amber-600 bg-amber-50/30' : 'text-slate-900'}`} value={item.amount} onChange={e => updateItem(item.id, 'amount', e.target.value)} />
                       </td>
                       <td className="p-2 border-r border-slate-100 text-center">
-                        <button type="button" onClick={() => setActiveModalItemId(item.id)} className={`w-full py-1.5 px-2 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 border transition-colors ${item.receiptFile ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100 hover:text-slate-700'}`}>
+                        <button type="button" onClick={() => setActiveModalItemId(item.id)} className={`w-full py-1.5 px-2 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 border transition-colors ${item.receiptFile ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>
                           {item.receiptFile ? <><CheckCircle2 size={14} /> Attached</> : <><ImageIcon size={14} /> Upload</>}
                         </button>
                       </td>
                       <td className="p-0 text-center">
-                        <button type="button" onClick={() => removeItem(item.id)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100">
+                        <button type="button" onClick={() => removeItem(item.id)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
                           <Trash2 size={16} />
                         </button>
                       </td>
@@ -353,7 +333,7 @@ export default function NewClaimPage() {
               <button 
                 type="submit" 
                 disabled={isSubmitting} 
-                className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 text-white px-8 py-3.5 rounded-xl font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md"
+                className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-8 py-3.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md"
               >
                 {isSubmitting ? <><Loader2 className="animate-spin" size={18}/> Saving...</> : <>Submit Claim <ChevronRight size={18}/></>}
               </button>
@@ -376,7 +356,6 @@ export default function NewClaimPage() {
 
               <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
                 
-                {/* LEFT SIDE: UPLOADS */}
                 <div className="space-y-4">
                   <label className="text-sm font-semibold text-slate-700 flex justify-between">
                     Original Receipt <span className="text-red-500 font-normal text-xs">*Required</span>
@@ -392,64 +371,30 @@ export default function NewClaimPage() {
                   
                   {activeModalItem.isForeign && (
                     <div className="animate-in fade-in slide-in-from-top-2 space-y-3 mt-4">
-                      <label className="text-sm font-semibold text-slate-700 flex justify-between">
-                        Bank Conversion Proof <span className="text-slate-500 font-normal text-xs">Required</span>
-                      </label>
+                      <label className="text-sm font-semibold text-slate-700">Bank Conversion Proof</label>
                       <FileUploadZone file={activeModalItem.conversionFile} onFileSelect={(f: File | null) => updateItem(activeModalItem.id, 'conversionFile', f)} compact={true} />
                     </div>
                   )}
                 </div>
 
-                {/* RIGHT SIDE: VERIFICATION */}
                 <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 h-fit">
                   <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 border-b border-slate-200 pb-2">Verify Row Details</h4>
-                  
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div>
                       <label className="text-xs font-semibold text-slate-600 block mb-1">Receipt No.</label>
-                      <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" value={activeModalItem.receiptNo} onChange={e => updateItem(activeModalItem.id, 'receiptNo', e.target.value)} />
+                      <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" value={activeModalItem.receiptNo} onChange={e => updateItem(activeModalItem.id, 'receiptNo', e.target.value)} />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-slate-600 block mb-1">Vendor</label>
-                      <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" value={activeModalItem.vendor} onChange={e => updateItem(activeModalItem.id, 'vendor', e.target.value)} />
+                      <input type="text" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" value={activeModalItem.vendor} onChange={e => updateItem(activeModalItem.id, 'vendor', e.target.value)} />
                     </div>
                   </div>
-
-                  {activeModalItem.isForeign && (
-                    <div className="grid grid-cols-2 gap-4 mb-4 bg-amber-100/50 p-4 rounded-lg border border-amber-200 animate-in fade-in">
-                      <div>
-                        <label className="text-xs font-semibold text-amber-800 block mb-1">Orig. Currency</label>
-                        <select 
-                          className="w-full p-2.5 bg-white border border-amber-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 font-medium"
-                          value={activeModalItem.originalCurrency} 
-                          onChange={e => updateItem(activeModalItem.id, 'originalCurrency', e.target.value)}
-                        >
-                          <option value="USD">USD</option>
-                          <option value="SGD">SGD</option>
-                          <option value="EUR">EUR</option>
-                          <option value="GBP">GBP</option>
-                          <option value="AUD">AUD</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-amber-800 block mb-1">Orig. Amount</label>
-                        <input 
-                          type="number" step="0.01" placeholder="0.00"
-                          className="w-full p-2.5 bg-white border border-amber-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-amber-500 font-medium"
-                          value={activeModalItem.originalAmount} 
-                          onChange={e => updateItem(activeModalItem.id, 'originalAmount', e.target.value)} 
-                        />
-                      </div>
-                    </div>
-                  )}
-
                   <div>
                     <label className="text-xs font-bold text-slate-800 block mb-1">Final Amount (MYR)</label>
                     <div className="relative">
                       <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-medium">MYR</span>
                       <input 
-                        type="number" step="0.01" placeholder="0.00"
-                        className="w-full pl-12 p-3 border-2 border-slate-300 rounded-lg focus:border-blue-500 focus:ring-0 outline-none font-bold text-xl text-slate-900 transition-colors" 
+                        type="number" step="0.01" className="w-full pl-12 p-3 border-2 border-slate-300 rounded-lg focus:border-blue-500 outline-none font-bold text-xl text-slate-900" 
                         value={activeModalItem.amount} 
                         onChange={e => updateItem(activeModalItem.id, 'amount', e.target.value)} 
                       />
@@ -459,7 +404,7 @@ export default function NewClaimPage() {
 
               </div>
               <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-                <button onClick={() => setActiveModalItemId(null)} className="bg-slate-900 text-white px-8 py-2.5 rounded-lg font-bold hover:bg-slate-800 transition-colors shadow-sm">
+                <button onClick={() => setActiveModalItemId(null)} className="bg-slate-900 text-white px-8 py-2.5 rounded-lg font-bold hover:bg-slate-800 shadow-sm">
                   Save & Close
                 </button>
               </div>
@@ -468,74 +413,6 @@ export default function NewClaimPage() {
         )}
       </main>
     </div>
-  );
-}
-
-// --- REUSABLE COMPONENTS ---
-
-function Navbar({ user, role, departments, activeDepartment, onDepartmentChange, onSignOut }: any) {
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const activeDeptName = departments?.find((d: any) => d.id === activeDepartment)?.name || 'Agency OS';
-
-  return (
-    <nav className="bg-white border-b border-slate-200 sticky top-0 z-10">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="bg-slate-900 text-white p-2.5 rounded-lg shadow-sm"><Building size={20} /></div>
-          
-          {/* Workspace Switcher */}
-          <div className="relative ml-2">
-            <button 
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)} 
-              className="flex items-center gap-2 font-bold text-lg tracking-tight hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-colors text-slate-900"
-            >
-              {activeDeptName}
-              <ChevronDown size={16} className={`text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-            
-            {isDropdownOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)}></div>
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 shadow-xl rounded-xl py-2 z-20 animate-in fade-in zoom-in-95 duration-200">
-                  <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider">Switch Workspace</div>
-                  {departments?.map((dept: any) => (
-                    <button 
-                      key={dept.id}
-                      onClick={() => { onDepartmentChange(dept.id); setIsDropdownOpen(false); }}
-                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between transition-colors"
-                    >
-                      <span className={activeDepartment === dept.id ? 'font-bold text-blue-600' : 'font-medium text-slate-700'}>
-                        {dept.name}
-                      </span>
-                      {activeDepartment === dept.id && <Check size={16} className="text-blue-600" />}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 text-sm font-medium text-slate-600">
-          <div className="hidden sm:flex items-center gap-3">
-             {(role === 'admin' || role === 'superadmin') && (
-              <span className="bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold px-2.5 py-1 rounded uppercase tracking-wider">
-                Admin
-              </span>
-            )}
-            {role === 'hod' && (
-              <span className="bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-2.5 py-1 rounded uppercase tracking-wider">
-                HOD
-              </span>
-            )}
-            <span>{user?.email}</span>
-          </div>
-          <button onClick={onSignOut} className="text-slate-500 hover:text-red-600 flex items-center gap-1.5 p-2 rounded-md hover:bg-red-50 transition-colors font-semibold">
-            <LogOut size={18} /> Sign Out
-          </button>
-        </div>
-      </div>
-    </nav>
   );
 }
 
@@ -562,7 +439,7 @@ function FileUploadZone({ file, onFileSelect, compact = false }: { file: any, on
           </div>
         )}
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onFileSelect(null); }} className="bg-white text-red-600 px-4 py-2 rounded-lg font-bold shadow-lg hover:bg-red-50 flex items-center gap-2 transition-colors">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onFileSelect(null); }} className="bg-white text-red-600 px-4 py-2 rounded-lg font-bold shadow-lg hover:bg-red-50 flex items-center gap-2">
             <Trash2 size={16} /> Remove File
           </button>
         </div>

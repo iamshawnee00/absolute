@@ -2,166 +2,272 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Building, Plus, AlertCircle, Eye, Loader2, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { 
+  Plus, Eye, Loader2, Filter, Receipt, 
+  CheckCircle2, Clock, AlertCircle, TrendingUp
+} from 'lucide-react';
+import Navbar from '@/components/Navbar';
+
+interface Claim {
+  dbId: string;
+  displayId: string;
+  date: string;
+  company: string;
+  amount: number;
+  status: string;
+  purpose: string;
+  department: string;
+}
 
 export default function ClaimsDashboard() {
   const supabase = createClient();
   const router = useRouter();
   
+  // --- AUTH & PROFILE STATE ---
   const [user, setUser] = useState<any>(null);
-  const [userRole, setUserRole] = useState('staff');
-  const [authLoading, setAuthLoading] = useState(true);
-  const [claimsList, setClaimsList] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
+  // --- DATA STATES ---
+  const [claimsList, setClaimsList] = useState<Claim[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [activeDepartment, setActiveDepartment] = useState('all');
+  const [isDataLoading, setIsDataLoading] = useState(false);
+
+  // 1. Initial Load: Auth & Master Data
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.push('/login');
-      } else {
-        setUser(session.user);
-        
-        // Fetch User Role
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', session.user.id)
-          .single();
-          
-        if (profile?.role) setUserRole(profile.role);
-        setAuthLoading(false);
+        return;
       }
-    });
+      setUser(session.user);
+
+      // Fetch Profile & All Departments (for the switcher)
+      const [profileRes, deptsRes] = await Promise.all([
+        supabase.from('profiles').select('*, departments(name)').eq('id', session.user.id).maybeSingle(),
+        supabase.from('departments').select('*').order('name')
+      ]);
+
+      if (profileRes.data) {
+        setProfile(profileRes.data);
+        // Initially set the switcher to their own department if they aren't a SuperAdmin
+        if (profileRes.data.role !== 'superadmin' && profileRes.data.department_id) {
+          setActiveDepartment(profileRes.data.department_id);
+        }
+      }
+      
+      if (deptsRes.data) {
+        setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...deptsRes.data]);
+      }
+
+      setLoading(false);
+    }
+    init();
   }, [router, supabase]);
 
+  // 2. Fetch Claims based on Active Department and User Role
   useEffect(() => {
-    if (!user) return;
+    if (!user || !profile) return;
+
     const fetchClaims = async () => {
-      setIsLoading(true);
+      setIsDataLoading(true);
       
-      // Bucket 2 Logic: Admins see all, Staff see only theirs
       let query = supabase
         .from('claims')
-        .select('*, companies(name)')
+        .select('*, companies(name), departments(name)')
         .order('created_at', { ascending: false });
-        
-      if (userRole !== 'admin') {
+
+      // --- PERMISSION & FILTER LOGIC ---
+      if (profile.role === 'staff') {
+        // Staff: Only see personal claims
         query = query.eq('user_id', user.id);
+      } else if (profile.role === 'manager') {
+        // Manager: Only see their department's claims
+        query = query.eq('department_id', profile.department_id);
+      } else {
+        // HOD/SuperAdmin: Filter by the Switcher selection
+        if (activeDepartment !== 'all') {
+          query = query.eq('department_id', activeDepartment);
+        }
       }
       
-      const { data } = await query;
+      const { data, error } = await query;
       
       if (data) {
         setClaimsList(data.map((c: any) => ({
-          id: c.id.substring(0, 8).toUpperCase(),
           dbId: c.id,
+          displayId: c.id.substring(0, 8).toUpperCase(),
           date: c.claim_date,
           company: c.companies?.name || 'Unknown Entity',
           amount: c.total_amount,
-          status: c.status
+          status: c.status,
+          purpose: c.purpose,
+          department: c.departments?.name || 'Unassigned'
         })));
       }
-      setIsLoading(false);
+      setIsDataLoading(false);
     };
     
     fetchClaims();
-  }, [user, userRole, supabase]);
+  }, [user, profile, activeDepartment, supabase]);
 
-  if (authLoading || isLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-600" size={32} /></div>;
-  if (!user) return null;
+  const stats = {
+    pending: claimsList.filter(c => c.status === 'Pending').length,
+    approved: claimsList.filter(c => c.status === 'Approved' || c.status === 'Paid').length,
+    totalAmount: claimsList.reduce((acc, curr) => acc + curr.amount, 0)
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <Loader2 className="animate-spin text-blue-600" size={32} />
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      <Navbar user={user} role={userRole} onSignOut={() => { supabase.auth.signOut(); router.push('/login'); }} />
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20">
+      <Navbar 
+        showSwitcher={true}
+        departments={departments}
+        activeDepartment={activeDepartment}
+        onDepartmentChange={setActiveDepartment}
+      />
       
       <main className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 animate-in fade-in slide-in-from-bottom-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        
+        {/* Header Section */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              {userRole === 'admin' ? 'All Agency Claims' : 'My Claims'}
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+              Expenses Dashboard
             </h1>
-            <p className="text-slate-500 text-sm mt-1">Manage and track expense reimbursements.</p>
+            <p className="text-slate-500 mt-1">
+              {profile?.role === 'staff' ? 'Track and manage your personal claims.' : 'Monitor and approve department expenditures.'}
+            </p>
           </div>
+          
           <button 
             onClick={() => router.push('/claims/new')}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium flex items-center gap-2 shadow-sm"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
           >
-            <Plus size={18} /> Submit New Claim
+            <Plus size={20} />
+            New Claim
           </button>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-              <tr>
-                <th className="px-6 py-4 font-semibold">Claim ID</th>
-                <th className="px-6 py-4 font-semibold">Date</th>
-                <th className="px-6 py-4 font-semibold">Entity</th>
-                <th className="px-6 py-4 font-semibold text-right">Amount (MYR)</th>
-                <th className="px-6 py-4 font-semibold">Status</th>
-                <th className="px-6 py-4 font-semibold text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {claimsList.map((claim: any) => (
-                <tr 
-                  key={claim.id} 
-                  className="hover:bg-slate-50 transition-colors cursor-pointer group" 
-                  onClick={() => router.push(`/claims/${claim.dbId}`)}
-                >
-                  <td className="px-6 py-4 font-medium text-blue-600 group-hover:underline">{claim.id}</td>
-                  <td className="px-6 py-4 text-slate-600">{claim.date}</td>
-                  <td className="px-6 py-4 text-slate-600">{claim.company}</td>
-                  <td className="px-6 py-4 font-medium text-right">{Number(claim.amount).toFixed(2)}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                      claim.status === 'Approved' ? 'bg-green-100 text-green-700' : 
-                      claim.status === 'Paid' ? 'bg-blue-100 text-blue-700' : 
-                      claim.status === 'Rejected' ? 'bg-red-100 text-red-700' :
-                      'bg-amber-100 text-amber-700'
-                    }`}>
-                      <AlertCircle size={14} /> {claim.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button className="text-slate-400 hover:text-blue-600 transition-colors"><Eye size={18} /></button>
-                  </td>
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                <Clock size={24} />
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Pending Approval</p>
+                <p className="text-2xl font-bold text-slate-900">{stats.pending}</p>
+              </div>
+           </div>
+           
+           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-green-50 text-green-600 rounded-xl">
+                <CheckCircle2 size={24} />
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Processed</p>
+                <p className="text-2xl font-bold text-slate-900">{stats.approved}</p>
+              </div>
+           </div>
+
+           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+                <TrendingUp size={24} />
+              </div>
+              <div>
+                <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Total Value (View)</p>
+                <p className="text-2xl font-bold text-slate-900">
+                  <span className="text-sm text-slate-400 mr-1">MYR</span>
+                  {stats.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+           </div>
+        </div>
+
+        {/* Expense Log Table */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <h2 className="font-bold text-slate-800 flex items-center gap-2 uppercase text-xs tracking-widest">
+              <Receipt size={16} className="text-blue-600" />
+              Expense Log
+            </h2>
+            {isDataLoading && <Loader2 className="animate-spin text-blue-600" size={18} />}
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-white border-b border-slate-200 text-slate-500 uppercase text-[10px] tracking-widest font-bold">
+                <tr>
+                  <th className="px-6 py-4">ID</th>
+                  <th className="px-6 py-4">Date</th>
+                  <th className="px-6 py-4">Entity / Department</th>
+                  <th className="px-6 py-4 text-right">Amount (MYR)</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Action</th>
                 </tr>
-              ))}
-              {claimsList.length === 0 && (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-500">No claims found.</td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {claimsList.map((claim) => (
+                  <tr 
+                    key={claim.dbId} 
+                    className="hover:bg-slate-50 transition-colors group cursor-pointer" 
+                    onClick={() => router.push(`/claims/${claim.dbId}`)}
+                  >
+                    <td className="px-6 py-4 font-bold text-blue-600 group-hover:underline">
+                      {claim.displayId}
+                    </td>
+                    <td className="px-6 py-4 text-slate-600 font-medium">{claim.date}</td>
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-slate-900">{claim.company}</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">
+                         {claim.department}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 font-bold text-right text-slate-900">
+                      {claim.amount.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                        claim.status === 'Approved' ? 'bg-green-50 text-green-700 border-green-200' : 
+                        claim.status === 'Paid' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
+                        claim.status === 'Rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+                        'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        {claim.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button className="p-2 text-slate-300 group-hover:text-blue-600 transition-colors">
+                        <Eye size={20} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                
+                {claimsList.length === 0 && !isDataLoading && (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-16 text-center">
+                      <div className="flex flex-col items-center gap-2 text-slate-400">
+                        <AlertCircle size={32} strokeWidth={1.5} />
+                        <p className="italic">No expense claims found for this view.</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </main>
     </div>
-  );
-}
-
-function Navbar({ user, role, onSignOut }: any) {
-  return (
-    <nav className="bg-white border-b border-slate-200 sticky top-0 z-10">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="bg-slate-900 text-white p-2 rounded-lg"><Building size={20} /></div>
-          <span className="font-bold text-lg tracking-tight">Agency OS</span>
-        </div>
-        <div className="flex items-center gap-4 text-sm font-medium text-slate-600">
-          <div className="hidden sm:flex items-center gap-3">
-             {role === 'admin' && (
-              <span className="bg-purple-100 text-purple-700 border border-purple-200 text-xs font-bold px-2 py-1 rounded uppercase tracking-wider">
-                Admin
-              </span>
-            )}
-            <span>{user?.email}</span>
-          </div>
-          <button onClick={onSignOut} className="text-slate-400 hover:text-red-500 flex items-center gap-1.5 p-2 rounded-md hover:bg-red-50">
-            <LogOut size={18} /> Sign Out
-          </button>
-        </div>
-      </div>
-    </nav>
   );
 }

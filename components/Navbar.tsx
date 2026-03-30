@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { 
-  Building, LogOut, ChevronDown, Check, Settings
+  Building, LogOut, ChevronDown, Check, Settings, Shield
 } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
@@ -53,7 +53,8 @@ export default function Navbar({
 
   const activeDeptName = departments?.find(d => d.id === activeDepartment)?.name || 'Agency OS';
   const canSwitch = profile?.role === 'hod' || profile?.role === 'superadmin';
-  const canSeeSettings = profile && (profile.role === 'superadmin' || profile.role === 'hod');
+  const canSeeGlobalSettings = profile && (profile.role === 'superadmin' || profile.role === 'hod');
+  const canSeeAccessSettings = profile && (profile.role === 'superadmin' || profile.role === 'hod' || profile.role === 'manager');
 
   return (
     <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
@@ -119,8 +120,19 @@ export default function Navbar({
         {/* RIGHT SIDE: Controls & Profile */}
         <div className="flex items-center gap-2 sm:gap-4 text-sm font-medium text-slate-600">
           
+          {/* Access Settings Link */}
+          {canSeeAccessSettings && (
+            <button 
+              onClick={() => router.push('/settings/access')} 
+              className="text-slate-500 hover:text-blue-600 flex items-center gap-1.5 p-2 rounded-lg hover:bg-blue-50 transition-colors font-medium text-sm tooltip"
+              title="Access Matrix"
+            >
+              <Shield size={18} /> <span className="hidden md:inline">Permissions</span>
+            </button>
+          )}
+
           {/* Global Settings Link */}
-          {canSeeSettings && (
+          {canSeeGlobalSettings && (
             <button 
               onClick={() => router.push('/settings')} 
               className="text-slate-500 hover:text-blue-600 flex items-center gap-1.5 p-2 rounded-lg hover:bg-blue-50 transition-colors font-medium text-sm tooltip"

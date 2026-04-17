@@ -5,20 +5,12 @@ import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { 
   ArrowLeft, FileText, Plus, 
-  Trash2, CheckCircle2, Image as ImageIcon, X, Upload, ChevronRight, Loader2, File as FileIcon
+  Trash2, CheckCircle2, Image as ImageIcon, X, Upload, ChevronRight, Loader2, File as FileIcon, FileMinus
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 
-// --- TYPES & INTERFACES ---
-interface Company {
-  id: string;
-  name: string;
-}
-
-interface Department {
-  id: string;
-  name: string;
-}
+interface Company { id: string; name: string; }
+interface Department { id: string; name: string; }
 
 interface LineItem {
   id: number;
@@ -38,21 +30,19 @@ export default function NewClaimPage() {
   const supabase = createClient();
   const router = useRouter();
   
-  // --- AUTH & ROLES ---
   const [user, setUser] = useState<any>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   
-  // --- MASTER DATA ---
   const [companies, setCompanies] = useState<Company[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   
-  // --- APP STATE ---
   const [activeDepartment, setActiveDepartment] = useState('all');
-  const [formData, setFormData] = useState({ companyId: '', purpose: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeModalItemId, setActiveModalItemId] = useState<number | null>(null);
   
-  // Initialize with 5 empty rows
+  // NEW: Added hasReceipts to formData
+  const [formData, setFormData] = useState({ companyId: '', purpose: '', hasReceipts: true });
+  
   const [items, setItems] = useState<LineItem[]>(
     Array.from({ length: 5 }).map((_, i) => ({
       id: Date.now() + i, date: '', receiptNo: '', vendor: '', remarks: '', amount: '', 
@@ -61,64 +51,35 @@ export default function NewClaimPage() {
     }))
   );
 
-  // --- INITIALIZATION ---
   useEffect(() => {
     async function initializeApp() {
       const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        router.push('/login');
-        return;
-      }
-
+      if (!session) { router.push('/login'); return; }
       setUser(session.user);
 
       try {
-        // Fetch User Profile for Initial Department
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('department_id')
-          .eq('id', session.user.id)
-          .maybeSingle();
-          
+        const { data: profile } = await supabase.from('profiles').select('department_id').eq('id', session.user.id).maybeSingle();
         if (profile?.department_id) setActiveDepartment(profile.department_id);
         
-        // Fetch Companies (Entities)
         const { data: companiesData } = await supabase.from('companies').select('id, name');
         if (companiesData) setCompanies(companiesData);
 
-        // Fetch Departments for Switcher
         const { data: deptData } = await supabase.from('departments').select('id, name').order('name');
-        if (deptData) {
-          setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...deptData]);
-        }
+        if (deptData) setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...deptData]);
       } catch (error) {
         console.error("Initialization error:", error);
       } finally {
         setIsInitializing(false);
       }
     }
-
     initializeApp();
   }, [router, supabase]);
 
-  // --- HELPERS ---
   const calculateTotal = () => items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-  
-  const addItem = () => setItems([...items, { 
-    id: Date.now(), date: '', receiptNo: '', vendor: '', remarks: '', amount: '', 
-    isForeign: false, originalCurrency: 'USD', originalAmount: '', receiptFile: null, conversionFile: null 
-  }]);
-  
-  const updateItem = (id: number, field: keyof LineItem, value: any) => {
-    setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
-  };
-  
-  const removeItem = (id: number) => { 
-    if (items.length > 1) setItems(items.filter(item => item.id !== id)); 
-  };
+  const addItem = () => setItems([...items, { id: Date.now(), date: '', receiptNo: '', vendor: '', remarks: '', amount: '', isForeign: false, originalCurrency: 'USD', originalAmount: '', receiptFile: null, conversionFile: null }]);
+  const updateItem = (id: number, field: keyof LineItem, value: any) => setItems(items.map(item => item.id === id ? { ...item, [field]: value } : item));
+  const removeItem = (id: number) => { if (items.length > 1) setItems(items.filter(item => item.id !== id)); };
 
-  // --- SUBMISSION LOGIC ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -127,16 +88,27 @@ export default function NewClaimPage() {
       return; 
     }
     
-    const validItems = items.filter(item => item.amount || item.vendor || item.receiptNo || item.receiptFile);
+    // Only process rows that have actual data
+    const validItems = items.filter(item => item.amount && item.vendor);
     if (validItems.length === 0) { 
-      alert("Please enter at least one valid expense line item."); 
+      alert("Please enter at least one valid expense line item (Requires Vendor and Amount)."); 
       return; 
+    }
+
+    // NEW: Validation Check
+    if (formData.hasReceipts) {
+      for (const item of validItems) {
+        if (!item.receiptFile) {
+          alert(`Row missing receipt! Please attach a receipt for vendor: ${item.vendor}`);
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
 
     try {
-      // 1. Insert Claim Header
+      // 1. Insert Claim Header (Now saves has_receipts)
       const { data: claimData, error: claimError } = await supabase.from('claims').insert({
         user_id: user.id, 
         company_id: formData.companyId, 
@@ -144,7 +116,8 @@ export default function NewClaimPage() {
         claim_date: new Date().toISOString().split('T')[0],
         purpose: formData.purpose, 
         status: 'Pending', 
-        total_amount: calculateTotal()
+        total_amount: calculateTotal(),
+        has_receipts: formData.hasReceipts
       }).select().single();
 
       if (claimError) throw new Error(`Claim header error: ${claimError.message}`);
@@ -154,7 +127,7 @@ export default function NewClaimPage() {
         const { data: itemData, error: itemError } = await supabase.from('claim_items').insert({
           claim_id: claimData.id, 
           expense_date: item.date || new Date().toISOString().split('T')[0],
-          receipt_no: item.receiptNo, 
+          receipt_no: formData.hasReceipts ? item.receiptNo : 'N/A', 
           vendor_name: item.vendor, 
           remarks: item.remarks,
           is_foreign_currency: item.isForeign, 
@@ -166,25 +139,22 @@ export default function NewClaimPage() {
 
         if (itemError) throw new Error(`Item insertion error: ${itemError.message}`);
 
-        const uploadFile = async (file: File, fileType: string) => {
-          if (!file) return;
-          const fileExt = file.name.split('.').pop();
-          const filePath = `${user.id}/${claimData.id}/${itemData.id}_${fileType.replace(/\s+/g, '')}.${fileExt}`;
-          
-          const { error: uploadError } = await supabase.storage.from('receipts').upload(filePath, file);
-          if (uploadError) throw new Error(`File upload error: ${uploadError.message}`);
-          
-          const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filePath);
-          
-          await supabase.from('receipts').insert({ 
-            claim_item_id: itemData.id, 
-            file_url: urlData.publicUrl, 
-            file_type: fileType 
-          });
-        };
+        if (formData.hasReceipts) {
+          const uploadFile = async (file: File, fileType: string) => {
+            if (!file) return;
+            const fileExt = file.name.split('.').pop();
+            const filePath = `${user.id}/${claimData.id}/${itemData.id}_${fileType.replace(/\s+/g, '')}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage.from('receipts').upload(filePath, file);
+            if (uploadError) throw new Error(`File upload error: ${uploadError.message}`);
+            
+            const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filePath);
+            await supabase.from('receipts').insert({ claim_item_id: itemData.id, file_url: urlData.publicUrl, file_type: fileType });
+          };
 
-        if (item.receiptFile) await uploadFile(item.receiptFile, 'Original');
-        if (item.conversionFile) await uploadFile(item.conversionFile, 'Conversion Proof');
+          if (item.receiptFile) await uploadFile(item.receiptFile, 'Original');
+          if (item.conversionFile) await uploadFile(item.conversionFile, 'Conversion Proof');
+        }
       }
       
       router.push('/claims'); 
@@ -198,21 +168,13 @@ export default function NewClaimPage() {
 
   const activeModalItem = items.find(i => i.id === activeModalItemId);
 
-  if (isInitializing || !user) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="animate-spin text-blue-600" size={32} />
-      </div>
-    );
-  }
+  if (isInitializing || !user) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={32} /></div>;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24 text-slate-900 font-sans">
       <Navbar 
-        showSwitcher={true}
-        departments={departments}
-        activeDepartment={activeDepartment}
-        onDepartmentChange={setActiveDepartment}
+        showSwitcher={true} departments={departments}
+        activeDepartment={activeDepartment} onDepartmentChange={setActiveDepartment}
       />
       
       <main className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 animate-in fade-in slide-in-from-right-8">
@@ -225,13 +187,33 @@ export default function NewClaimPage() {
           {/* HEADER CARD */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* NEW: Claim Type Toggle */}
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-semibold text-slate-700">Claim Type *</label>
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <label className={`flex-1 flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${formData.hasReceipts ? 'border-blue-500 bg-blue-50/30 shadow-sm' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
+                    <input type="radio" name="claimType" checked={formData.hasReceipts} onChange={() => setFormData({...formData, hasReceipts: true})} className="w-4 h-4 text-blue-600" />
+                    <div>
+                      <div className="font-bold text-slate-900">Standard Expense</div>
+                      <div className="text-xs text-slate-500">Requires valid receipt uploads</div>
+                    </div>
+                  </label>
+                  <label className={`flex-1 flex items-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${!formData.hasReceipts ? 'border-amber-500 bg-amber-50/30 shadow-sm' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}>
+                    <input type="radio" name="claimType" checked={!formData.hasReceipts} onChange={() => setFormData({...formData, hasReceipts: false})} className="w-4 h-4 text-amber-600" />
+                    <div>
+                      <div className="font-bold text-slate-900">Allowance / Mileage</div>
+                      <div className="text-xs text-slate-500">No physical receipts required</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-700">Billing Entity *</label>
                 <select 
-                  required 
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-medium"
-                  value={formData.companyId} 
-                  onChange={e => setFormData({...formData, companyId: e.target.value})}
+                  required className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-medium"
+                  value={formData.companyId} onChange={e => setFormData({...formData, companyId: e.target.value})}
                 >
                   <option value="" disabled>Select Entity...</option>
                   {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -240,12 +222,9 @@ export default function NewClaimPage() {
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-700">Claim Purpose *</label>
                 <input 
-                  required 
-                  type="text" 
-                  placeholder="e.g., Meta Ads March 2026" 
+                  required type="text" placeholder="e.g., Meta Ads March 2026" 
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-medium placeholder:text-slate-400"
-                  value={formData.purpose} 
-                  onChange={e => setFormData({...formData, purpose: e.target.value})} 
+                  value={formData.purpose} onChange={e => setFormData({...formData, purpose: e.target.value})} 
                 />
               </div>
             </div>
@@ -258,8 +237,7 @@ export default function NewClaimPage() {
                 <FileText size={18} className="text-blue-600" /> Expense Line Items
               </h2>
               <button 
-                type="button" 
-                onClick={addItem} 
+                type="button" onClick={addItem} 
                 className="text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-1.5 rounded-md font-medium transition-colors flex items-center gap-1.5"
               >
                 <Plus size={16} /> Add Row
@@ -271,11 +249,11 @@ export default function NewClaimPage() {
                 <thead className="bg-white text-xs uppercase text-slate-500 border-b border-slate-200">
                   <tr>
                     <th className="p-3 w-36 border-r border-slate-100">Date</th>
-                    <th className="p-3 w-40 border-r border-slate-100">Receipt No</th>
-                    <th className="p-3 w-48 border-r border-slate-100">Vendor</th>
+                    {formData.hasReceipts && <th className="p-3 w-40 border-r border-slate-100">Receipt No</th>}
+                    <th className="p-3 w-48 border-r border-slate-100">{formData.hasReceipts ? 'Vendor' : 'Category/Description'}</th>
                     <th className="p-3 min-w-[150px] border-r border-slate-100">Remarks</th>
                     <th className="p-3 w-36 border-r border-slate-100">Amount (MYR)</th>
-                    <th className="p-3 w-28 text-center border-r border-slate-100">Receipt</th>
+                    {formData.hasReceipts && <th className="p-3 w-28 text-center border-r border-slate-100">Receipt</th>}
                     <th className="p-3 w-12 text-center"></th>
                   </tr>
                 </thead>
@@ -285,23 +263,31 @@ export default function NewClaimPage() {
                       <td className="p-0 border-r border-slate-100">
                         <input type="date" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.date} onChange={e => updateItem(item.id, 'date', e.target.value)} />
                       </td>
+                      
+                      {formData.hasReceipts && (
+                        <td className="p-0 border-r border-slate-100">
+                          <input type="text" placeholder="INV-001" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.receiptNo} onChange={e => updateItem(item.id, 'receiptNo', e.target.value)} />
+                        </td>
+                      )}
+                      
                       <td className="p-0 border-r border-slate-100">
-                        <input type="text" placeholder="INV-001" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.receiptNo} onChange={e => updateItem(item.id, 'receiptNo', e.target.value)} />
-                      </td>
-                      <td className="p-0 border-r border-slate-100">
-                        <input type="text" placeholder="Vendor Name" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.vendor} onChange={e => updateItem(item.id, 'vendor', e.target.value)} />
+                        <input type="text" placeholder={formData.hasReceipts ? "Vendor Name" : "e.g. Mileage Allowance"} className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.vendor} onChange={e => updateItem(item.id, 'vendor', e.target.value)} />
                       </td>
                       <td className="p-0 border-r border-slate-100">
                         <input type="text" placeholder="Optional notes" className="w-full p-3 bg-transparent outline-none text-sm text-slate-900 font-medium" value={item.remarks} onChange={e => updateItem(item.id, 'remarks', e.target.value)} />
                       </td>
                       <td className="p-0 border-r border-slate-100">
-                        <input type="number" step="0.01" placeholder="0.00" className={`w-full p-3 bg-transparent outline-none font-bold ${item.isForeign ? 'text-amber-600 bg-amber-50/30' : 'text-slate-900'}`} value={item.amount} onChange={e => updateItem(item.id, 'amount', e.target.value)} />
+                        <input type="number" step="0.01" placeholder="0.00" className={`w-full p-3 bg-transparent outline-none font-bold ${item.isForeign && formData.hasReceipts ? 'text-amber-600 bg-amber-50/30' : 'text-slate-900'}`} value={item.amount} onChange={e => updateItem(item.id, 'amount', e.target.value)} />
                       </td>
-                      <td className="p-2 border-r border-slate-100 text-center">
-                        <button type="button" onClick={() => setActiveModalItemId(item.id)} className={`w-full py-1.5 px-2 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 border transition-colors ${item.receiptFile ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>
-                          {item.receiptFile ? <><CheckCircle2 size={14} /> Attached</> : <><ImageIcon size={14} /> Upload</>}
-                        </button>
-                      </td>
+                      
+                      {formData.hasReceipts && (
+                        <td className="p-2 border-r border-slate-100 text-center">
+                          <button type="button" onClick={() => setActiveModalItemId(item.id)} className={`w-full py-1.5 px-2 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 border transition-colors ${item.receiptFile ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>
+                            {item.receiptFile ? <><CheckCircle2 size={14} /> Attached</> : <><ImageIcon size={14} /> Upload</>}
+                          </button>
+                        </td>
+                      )}
+
                       <td className="p-0 text-center">
                         <button type="button" onClick={() => removeItem(item.id)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
                           <Trash2 size={16} />
@@ -331,8 +317,7 @@ export default function NewClaimPage() {
                 </div>
               </div>
               <button 
-                type="submit" 
-                disabled={isSubmitting} 
+                type="submit" disabled={isSubmitting} 
                 className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white px-8 py-3.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md"
               >
                 {isSubmitting ? <><Loader2 className="animate-spin" size={18}/> Saving...</> : <>Submit Claim <ChevronRight size={18}/></>}
@@ -341,7 +326,7 @@ export default function NewClaimPage() {
           </div>
 
           {/* RECEIPT UPLOAD MODAL */}
-          {activeModalItemId !== null && activeModalItem && (
+          {activeModalItemId !== null && activeModalItem && formData.hasReceipts && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                 
@@ -350,7 +335,6 @@ export default function NewClaimPage() {
                     <FileText className="text-blue-600" size={20} /> 
                     Attach Receipt <span className="text-slate-400 text-sm font-normal">(Row {items.findIndex(i => i.id === activeModalItemId) + 1})</span>
                   </h3>
-                  {/* FIX 1: Added type="button" to prevent accidental form submission */}
                   <button type="button" onClick={() => setActiveModalItemId(null)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
                 </div>
 
@@ -433,7 +417,6 @@ export default function NewClaimPage() {
 
                 </div>
                 <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-                  {/* FIX 2: Added type="button" here as well! */}
                   <button type="button" onClick={() => setActiveModalItemId(null)} className="bg-slate-900 text-white px-8 py-2.5 rounded-lg font-bold hover:bg-slate-800 shadow-sm">
                     Save & Close
                   </button>

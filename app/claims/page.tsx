@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { 
   Plus, Eye, Loader2, Filter, Receipt, 
   CheckCircle2, Clock, AlertCircle, TrendingUp,
-  Search, Calendar, Building2, User
+  Search, Calendar, Building2, User, FileText, FileMinus
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 
@@ -20,21 +20,20 @@ interface Claim {
   purpose: string;
   department: string;
   person: string;
+  hasReceipts: boolean;
 }
 
 export default function ClaimsDashboard() {
   const supabase = createClient();
   const router = useRouter();
   
-  // --- AUTH & PROFILE STATE ---
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // --- DATA STATES ---
   const [claimsList, setClaimsList] = useState<Claim[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
-  const [activeDepartment, setActiveDepartment] = useState('all'); // Global Switcher
+  const [activeDepartment, setActiveDepartment] = useState('all'); 
   const [isDataLoading, setIsDataLoading] = useState(false);
 
   // --- MULTI-FILTER STATES ---
@@ -42,20 +41,16 @@ export default function ClaimsDashboard() {
     person: '',
     department: '',
     date: '',
-    status: ''
+    status: '',
+    claimType: '' // NEW filter state for With/Without Receipts
   });
 
-  // 1. Initial Load: Auth & Master Data
   useEffect(() => {
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push('/login');
-        return;
-      }
+      if (!session) { router.push('/login'); return; }
       setUser(session.user);
 
-      // Fetch Profile & All Departments
       const [profileRes, deptsRes] = await Promise.all([
         supabase.from('profiles').select('*, departments(name)').eq('id', session.user.id).maybeSingle(),
         supabase.from('departments').select('*').order('name')
@@ -68,37 +63,27 @@ export default function ClaimsDashboard() {
         }
       }
       
-      if (deptsRes.data) {
-        setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...deptsRes.data]);
-      }
-
+      if (deptsRes.data) setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...deptsRes.data]);
       setLoading(false);
     }
     init();
   }, [router, supabase]);
 
-  // 2. Fetch Claims based on Active Department and User Role
   useEffect(() => {
     if (!user || !profile) return;
 
     const fetchClaims = async () => {
       setIsDataLoading(true);
       
-      let query = supabase
-        .from('claims')
-        .select('*') // Removed all joins to prevent {} foreign key errors
-        .order('created_at', { ascending: false });
+      let query = supabase.from('claims').select('*').order('created_at', { ascending: false });
 
-      // --- PERMISSION & VISIBILITY LOGIC ---
       const isFinance = profile.departments?.name?.toLowerCase() === 'finance';
       const hasWorkspaceSwitcher = profile.role === 'superadmin' || profile.role === 'hod';
 
+      // Visibility Logic
       if (!hasWorkspaceSwitcher && !isFinance) {
-        if (profile.role === 'staff') {
-          query = query.eq('user_id', user.id);
-        } else if (profile.role === 'manager') {
-          query = query.eq('department_id', profile.department_id);
-        }
+        if (profile.role === 'staff') query = query.eq('user_id', user.id);
+        else if (profile.role === 'manager') query = query.eq('department_id', profile.department_id);
       } else if (hasWorkspaceSwitcher && activeDepartment !== 'all') {
         query = query.eq('department_id', activeDepartment);
       }
@@ -108,7 +93,6 @@ export default function ClaimsDashboard() {
       if (error) {
         console.error("Error fetching claims:", error);
       } else if (data) {
-        
         // Manually fetch names to bypass Supabase schema relationship errors
         const userIds = [...new Set(data.map((c: any) => c.user_id).filter(Boolean))];
         const companyIds = [...new Set(data.map((c: any) => c.company_id).filter(Boolean))];
@@ -138,7 +122,8 @@ export default function ClaimsDashboard() {
           status: c.status,
           purpose: c.purpose,
           department: deptMap[c.department_id] || 'Unassigned',
-          person: profileMap[c.user_id] || 'Unknown User'
+          person: profileMap[c.user_id] || 'Unknown User',
+          hasReceipts: c.has_receipts !== false // Default to true if null in DB
         })));
       }
       setIsDataLoading(false);
@@ -153,6 +138,11 @@ export default function ClaimsDashboard() {
     if (filters.department && c.department !== filters.department) return false;
     if (filters.date && c.date !== filters.date) return false;
     if (filters.person && !c.person.toLowerCase().includes(filters.person.toLowerCase())) return false;
+    
+    // NEW: Claim Type Filter
+    if (filters.claimType === 'with' && !c.hasReceipts) return false;
+    if (filters.claimType === 'without' && c.hasReceipts) return false;
+    
     return true;
   });
 
@@ -165,11 +155,7 @@ export default function ClaimsDashboard() {
 
   const isFinance = profile?.departments?.name?.toLowerCase() === 'finance';
 
-  if (loading) return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <Loader2 className="animate-spin text-blue-600" size={32} />
-    </div>
-  );
+  if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={32} /></div>;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20">
@@ -198,8 +184,7 @@ export default function ClaimsDashboard() {
             onClick={() => router.push('/claims/new')}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 shrink-0"
           >
-            <Plus size={20} />
-            New Claim
+            <Plus size={20} /> New Claim
           </button>
         </div>
 
@@ -283,6 +268,19 @@ export default function ClaimsDashboard() {
             </select>
           </div>
 
+          {/* NEW: Type Filter */}
+          <div className="flex-1 min-w-[150px]">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5"><FileText size={14}/> Claim Type</label>
+            <select 
+              className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-sm appearance-none"
+              value={filters.claimType} onChange={e => setFilters({...filters, claimType: e.target.value})}
+            >
+              <option value="">All Types</option>
+              <option value="with">With Receipts</option>
+              <option value="without">No Receipts</option>
+            </select>
+          </div>
+
           <div className="flex-1 min-w-[150px]">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5"><Calendar size={14}/> Exact Date</label>
             <input 
@@ -293,7 +291,7 @@ export default function ClaimsDashboard() {
           </div>
           
           <button 
-            onClick={() => setFilters({ person: '', department: '', date: '', status: '' })}
+            onClick={() => setFilters({ person: '', department: '', date: '', status: '', claimType: '' })}
             className="p-2.5 text-slate-400 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold transition-colors shrink-0"
             title="Clear Filters"
           >
@@ -333,6 +331,19 @@ export default function ClaimsDashboard() {
                     <td className="px-6 py-4">
                       <div className="font-bold text-blue-600 group-hover:underline">{claim.displayId}</div>
                       <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">{claim.date}</div>
+                      
+                      {/* NEW: Badge showing if the claim requires receipts */}
+                      <div className="mt-1.5">
+                        {claim.hasReceipts ? (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                            <FileText size={10}/> With Receipts
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-amber-600">
+                            <FileMinus size={10}/> Allowance / Mileage
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 font-semibold text-slate-800">{claim.person}</td>
                     <td className="px-6 py-4">

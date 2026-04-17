@@ -52,7 +52,11 @@ export default function Navbar({
   };
 
   const activeDeptName = departments?.find(d => d.id === activeDepartment)?.name || 'Agency OS';
-  const canSwitch = profile?.role === 'hod' || profile?.role === 'superadmin';
+  
+  // If the parent page passes `showSwitcher=true` (because of the Access Matrix granting multiple departments), 
+  // ANY staff member can use the switcher!
+  const canSwitch = showSwitcher && departments.length > 1;
+
   const canSeeGlobalSettings = profile && (profile.role === 'superadmin' || profile.role === 'hod');
   const canSeeAccessSettings = profile && (profile.role === 'superadmin' || profile.role === 'hod' || profile.role === 'manager');
 
@@ -142,7 +146,7 @@ export default function Navbar({
             </button>
           )}
 
-          {/* NEW: Standalone Notification System! */}
+          {/* Standalone Notification System */}
           <NotificationBell />
 
           <div className="h-6 w-px bg-slate-200 mx-1 hidden sm:block"></div>

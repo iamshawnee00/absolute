@@ -15,30 +15,41 @@ interface Department {
 }
 
 // --- APP CONFIGURATION ---
+// Added 'key' to perfectly match your MASTER_APPS from the Access Settings Matrix
 const DEPARTMENT_APPS = {
   marketing: [
-    { title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track marketing expenses' },
-    { title: 'Content Calendar', icon: Calendar, href: '#', color: 'bg-fuchsia-50 text-fuchsia-600', desc: 'Manage social media scheduling' },
-    { title: 'Campaign Analytics', icon: PieChart, href: '#', color: 'bg-purple-50 text-purple-600', desc: 'View ROAS and ad performance' },
-    { title: 'Media Assets', icon: MonitorPlay, href: '#', color: 'bg-indigo-50 text-indigo-600', desc: 'Access approved creative files' },
+    { key: 'claims', title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track marketing expenses' },
+    { key: 'calendar', title: 'Content Calendar', icon: Calendar, href: '#', color: 'bg-fuchsia-50 text-fuchsia-600', desc: 'Manage social media scheduling' },
+    { key: 'analytics', title: 'Campaign Analytics', icon: PieChart, href: '#', color: 'bg-purple-50 text-purple-600', desc: 'View ROAS and ad performance' },
+    { key: 'assets', title: 'Media Assets', icon: MonitorPlay, href: '#', color: 'bg-indigo-50 text-indigo-600', desc: 'Access approved creative files' },
   ],
   finance: [
-    { title: 'Global Claims', icon: FileCheck, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Review and approve agency claims' },
-    { title: 'Invoices & Billing', icon: FileSpreadsheet, href: '#', color: 'bg-emerald-50 text-emerald-600', desc: 'Manage client billing' },
-    { title: 'Payroll', icon: Wallet, href: '#', color: 'bg-amber-50 text-amber-600', desc: 'Process monthly payroll' },
+    { key: 'claims', title: 'Global Claims', icon: FileCheck, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Review and approve agency claims' },
+    { key: 'billing', title: 'Invoices & Billing', icon: FileSpreadsheet, href: '#', color: 'bg-emerald-50 text-emerald-600', desc: 'Manage client billing' },
+    { key: 'payroll', title: 'Payroll', icon: Wallet, href: '#', color: 'bg-amber-50 text-amber-600', desc: 'Process monthly payroll' },
   ],
   hr: [
-    { title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track expenses' },
-    { title: 'Employee Directory', icon: Users, href: '/hr/directory', color: 'bg-rose-50 text-rose-600', desc: 'Manage staff profiles' },
-    { title: 'Leave Management', icon: Calendar, href: '#', color: 'bg-teal-50 text-teal-600', desc: 'Approve PTO and sick leave' },
+    { key: 'claims', title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track expenses' },
+    { key: 'directory', title: 'Employee Directory', icon: Users, href: '/hr/directory', color: 'bg-rose-50 text-rose-600', desc: 'Manage staff profiles' },
+    { key: 'leave', title: 'Leave Management', icon: Calendar, href: '#', color: 'bg-teal-50 text-teal-600', desc: 'Approve PTO and sick leave' },
   ],
   operations: [
-    { title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track expenses' },
-    { title: 'Asset Tracking', icon: Settings, href: '#', color: 'bg-slate-100 text-slate-600', desc: 'Manage laptops and equipment' },
+    { key: 'claims', title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track expenses' },
+    { key: 'tracking', title: 'Asset Tracking', icon: Settings, href: '#', color: 'bg-slate-100 text-slate-600', desc: 'Manage laptops and equipment' },
   ],
   default: [
-    { title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track expenses' },
+    { key: 'claims', title: 'Expense Claims', icon: Receipt, href: '/claims', color: 'bg-blue-50 text-blue-600', desc: 'Submit and track expenses' },
   ]
+};
+
+// Helper function to map Database names to Configuration keys robustly
+const getDeptKey = (deptName: string) => {
+  const name = deptName.toLowerCase();
+  if (name.includes('human resources') || name === 'hr') return 'hr';
+  if (name.includes('marketing')) return 'marketing';
+  if (name.includes('finance')) return 'finance';
+  if (name.includes('operations')) return 'operations';
+  return 'default'; 
 };
 
 export default function AppDashboard() {
@@ -51,6 +62,9 @@ export default function AppDashboard() {
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [activeDepartment, setActiveDepartment] = useState('marketing');
+  
+  // NEW: State to hold the granular access matrix rules for the logged-in user
+  const [appAccess, setAppAccess] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     async function init() {
@@ -61,82 +75,122 @@ export default function AppDashboard() {
       }
       setUser(session.user);
 
-      const [profileRes, deptsRes] = await Promise.all([
+      // Fetch Profile, Departments, AND the Access Matrix rules simultaneously
+      const [profileRes, deptsRes, accessRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle(),
-        supabase.from('departments').select('*').order('name')
+        supabase.from('departments').select('*').order('name'),
+        supabase.from('user_app_access').select('*').eq('user_id', session.user.id)
       ]);
 
       const fetchedDepts = deptsRes.data || [];
-
-      const currentProfile = profileRes.data || {
-        role: 'staff',
-        full_name: session.user.email?.split('@')[0] || 'Team',
-        department_id: 'marketing'
-      };
-
-      const userDeptName = fetchedDepts.find(d => d.id === currentProfile.department_id)?.name;
-      currentProfile.departments = { name: userDeptName || 'Agency OS' };
-
-      setProfile(currentProfile);
-
-      if (currentProfile.department_id) {
-        setActiveDepartment(currentProfile.department_id);
-      }
+      const currentProfile = profileRes.data;
       
-      if (fetchedDepts.length > 0) {
-        setDepartments([{ id: 'all', name: 'Agency OS (All)' }, ...fetchedDepts]);
+      if (currentProfile) {
+        const userDeptName = fetchedDepts.find(d => d.id === currentProfile.department_id)?.name;
+        currentProfile.departments = { name: userDeptName || 'Agency OS' };
+        setProfile(currentProfile);
       }
+
+      setDepartments(fetchedDepts);
+
+      // Map the access rules into a clean object: { "claims": true, "assets": false }
+      const accessMap: Record<string, boolean> = {};
+      if (accessRes.data) {
+        accessRes.data.forEach((rule: any) => {
+          accessMap[rule.app_key] = rule.is_enabled;
+        });
+      }
+      setAppAccess(accessMap);
 
       setAuthLoading(false);
     }
     init();
   }, [router, supabase]);
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="animate-spin text-blue-600" size={32} />
-      </div>
-    );
-  }
+  if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-600" size={32} /></div>;
+  if (!user || !profile) return <div className="p-8 text-center text-red-500 font-bold mt-20">Failed to load profile. Please check database connectivity.</div>;
 
-  if (!user) return null;
-  if (!profile) return <div className="p-8 text-center text-red-500 font-bold mt-20">Failed to load profile. Please check database connectivity.</div>;
+  // --- 1. PROCESS GRANULAR ACCESS RULES ---
+  let allowedDeptIds = new Set<string>();
+  let allAllowedApps = new Map(); 
+  const isSuperAdmin = profile.role === 'superadmin';
 
-  // --- DYNAMIC APPS LOGIC (Handles the "All" Bird's-Eye View) ---
-  let availableApps = [];
-  
-  if (activeDepartment === 'all') {
-    // Combine ALL apps from all departments
-    const allAppsRaw = Object.values(DEPARTMENT_APPS).flat();
-    
-    // Deduplicate overlapping apps (like standard Expense Claims) using a Map
-    const uniqueApps = new Map();
-    allAppsRaw.forEach(app => {
-      // Use the href as the unique key, unless it's a placeholder '#', then use the title
-      const key = app.href !== '#' && app.href !== '' ? app.href : app.title;
-      if (!uniqueApps.has(key)) {
-        uniqueApps.set(key, app);
+  departments.forEach(dept => {
+    const deptKey = getDeptKey(dept.name);
+    const appsInDept = DEPARTMENT_APPS[deptKey as keyof typeof DEPARTMENT_APPS] || DEPARTMENT_APPS.default;
+
+    let hasAtLeastOneApp = false;
+
+    appsInDept.forEach(app => {
+      let isEnabled = false;
+      
+      if (isSuperAdmin) {
+        isEnabled = true; // SuperAdmins are immune to restrictions
+      } else if (appAccess[app.key] !== undefined) {
+        isEnabled = appAccess[app.key]; // Explicit Override from Matrix
+      } else {
+        isEnabled = profile.department_id === dept.id; // Default: Only see home dept
+      }
+
+      if (isEnabled) {
+        hasAtLeastOneApp = true;
+        // Deduplicate apps for the "Agency OS (All)" view
+        const uniqueKey = app.href !== '#' && app.href !== '' ? app.href : app.title;
+        if (!allAllowedApps.has(uniqueKey)) {
+          allAllowedApps.set(uniqueKey, app);
+        }
       }
     });
-    
-    availableApps = Array.from(uniqueApps.values());
-  } else {
-    // Standard Dept View: Match active department ID to the config key
-    const rawDeptName = departments.find(d => d.id === activeDepartment)?.name || '';
-    const normalizedKey = rawDeptName.toLowerCase();
-    availableApps = DEPARTMENT_APPS[normalizedKey as keyof typeof DEPARTMENT_APPS] || DEPARTMENT_APPS.default;
+
+    // If they have access to at least ONE app in this department, unlock the department!
+    if (hasAtLeastOneApp || isSuperAdmin) {
+      allowedDeptIds.add(dept.id);
+    }
+  });
+
+  // 2. Add 'All' view for power users OR anyone with cross-department access
+  if (profile.role === 'hod' || profile.role === 'superadmin' || allowedDeptIds.size > 1) {
+    allowedDeptIds.add('all');
   }
 
-  const activeDeptName = departments.find(d => d.id === activeDepartment)?.name || 'Unknown Department';
-  const isSuperAdminOrHOD = profile.role === 'superadmin' || profile.role === 'hod';
+  // 3. Build the final array of allowed departments for the Navbar switcher
+  const filteredDepartments = departments.filter(d => allowedDeptIds.has(d.id));
+  if (allowedDeptIds.has('all')) {
+    filteredDepartments.unshift({ id: 'all', name: 'Agency OS (All)' });
+  }
+
+  // Auto-correct active department if they are routed to a locked one
+  if (allowedDeptIds.size > 0 && !allowedDeptIds.has(activeDepartment)) {
+      if (allowedDeptIds.has(profile.department_id)) setActiveDepartment(profile.department_id);
+      else if (allowedDeptIds.has('all')) setActiveDepartment('all');
+      else setActiveDepartment(Array.from(allowedDeptIds)[0] as string);
+  }
+
+  // 4. Filter the specific grid apps based on the currently selected tab
+  let gridApps: any[] = [];
+  if (activeDepartment === 'all') {
+    gridApps = Array.from(allAllowedApps.values());
+  } else {
+    const rawDeptName = departments.find(d => d.id === activeDepartment)?.name || '';
+    const deptKey = getDeptKey(rawDeptName);
+    const appsInActiveDept = DEPARTMENT_APPS[deptKey as keyof typeof DEPARTMENT_APPS] || DEPARTMENT_APPS.default;
+    
+    gridApps = appsInActiveDept.filter(app => {
+      if (isSuperAdmin) return true;
+      if (appAccess[app.key] !== undefined) return appAccess[app.key];
+      return profile.department_id === activeDepartment;
+    });
+  }
+
+  const activeDeptName = filteredDepartments.find(d => d.id === activeDepartment)?.name || 'Unknown Department';
+  const showSwitcher = filteredDepartments.length > 1;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20">
       
       <Navbar 
-        showSwitcher={isSuperAdminOrHOD}
-        departments={departments}
+        showSwitcher={showSwitcher}
+        departments={filteredDepartments}
         activeDepartment={activeDepartment}
         onDepartmentChange={setActiveDepartment}
       />
@@ -149,14 +203,14 @@ export default function AppDashboard() {
           </h1>
           <p className="text-slate-500 text-lg">
             {activeDepartment === 'all' 
-              ? <span>You are viewing the <strong className="text-slate-700">Bird's-Eye View</strong>. Access tools across all departments.</span>
+              ? <span>You are viewing the <strong className="text-slate-700">Bird's-Eye View</strong>. Access tools across all authorized departments.</span>
               : <span>Access your tools and applications for the <strong className="text-slate-700">{activeDeptName}</strong> workspace.</span>
             }
           </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {availableApps.map((app, index) => {
+          {gridApps.map((app, index) => {
             const Icon = app.icon;
             return (
               <button

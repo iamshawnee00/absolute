@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useParams, useRouter } from 'next/navigation';
-import { Building, LogOut, ArrowLeft, AlertCircle, Loader2, Image as ImageIcon, MessageSquare } from 'lucide-react';
+import { Building, LogOut, ArrowLeft, AlertCircle, Loader2, Image as ImageIcon, MessageSquare, FileText } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 
 export default function ViewClaimPage() {
@@ -41,7 +41,7 @@ export default function ViewClaimPage() {
     async function fetchClaimDetails() {
       const { data: claimData, error: claimError } = await supabase
         .from('claims')
-        .select('*, companies(name)')
+        .select('*')
         .eq('id', dbId)
         .single();
         
@@ -49,16 +49,16 @@ export default function ViewClaimPage() {
         console.error("Error fetching claim details:", claimError);
       } else if (claimData) {
         
-        // Manually fetch the user's profile to avoid Foreign Key join issues
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', claimData.user_id)
-          .maybeSingle();
+        // Manually fetch the user's profile and company to avoid Foreign Key join issues
+        const [profileRes, companyRes] = await Promise.all([
+          supabase.from('profiles').select('full_name').eq('id', claimData.user_id).maybeSingle(),
+          supabase.from('companies').select('name').eq('id', claimData.company_id).maybeSingle()
+        ]);
 
         setClaim({
           ...claimData,
-          profiles: profileData || { full_name: 'Unknown User' }
+          profiles: profileRes.data || { full_name: 'Unknown User' },
+          companies: companyRes.data || { name: 'Unknown Entity' }
         });
       }
 
@@ -154,6 +154,23 @@ export default function ViewClaimPage() {
                 <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Billing Entity</p>
                 <p className="text-lg font-bold text-slate-900 mt-1">{claim.companies?.name}</p>
               </div>
+
+              {/* Display the Claim Type */}
+              <div>
+                <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Claim Type</p>
+                <div className="mt-1">
+                  {claim.has_receipts !== false ? (
+                    <span className="inline-flex items-center gap-2 text-slate-700 font-bold">
+                      <FileText size={18} className="text-blue-500"/> WITH RECEIPT
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 text-amber-700 font-bold bg-amber-50 px-3 py-1 rounded-lg border border-amber-200 w-fit">
+                      <AlertCircle size={18} className="text-amber-500"/> WITHOUT RECEIPT
+                    </span>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Purpose</p>
                 <p className="text-lg font-bold text-slate-900 mt-1">{claim.purpose || 'General Expenses'}</p>
@@ -190,29 +207,41 @@ export default function ViewClaimPage() {
                       {/* Date & Files Col */}
                       <td className="px-6 py-4 border-r border-slate-100 align-top">
                          <div className="font-bold text-slate-800 mb-3">{item.expense_date}</div>
-                         <div className="flex flex-col gap-2">
-                          {item.receipts?.map((r: any) => (
-                            <a 
-                              key={r.id} href={r.file_url} target="_blank" rel="noopener noreferrer"
-                              className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold w-fit"
-                            >
-                              <ImageIcon size={14} /> {r.file_type}
-                            </a>
-                          ))}
-                        </div>
+                         {claim.has_receipts !== false && (
+                           <div className="flex flex-col gap-2">
+                            {item.receipts?.map((r: any) => (
+                              <a 
+                                key={r.id} href={r.file_url} target="_blank" rel="noopener noreferrer"
+                                className="bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 text-xs font-bold w-fit"
+                              >
+                                <ImageIcon size={14} /> {r.file_type}
+                              </a>
+                            ))}
+                            {(!item.receipts || item.receipts.length === 0) && (
+                              <span className="text-xs text-red-500 font-bold italic flex items-center gap-1">
+                                <AlertCircle size={12}/> Missing Receipt
+                              </span>
+                            )}
+                          </div>
+                         )}
+                         {claim.has_receipts === false && (
+                           <span className="text-xs text-slate-400 font-medium italic">WITHOUT RECEIPT</span>
+                         )}
                       </td>
                       
                       {/* Details Col */}
                       <td className="px-6 py-4 border-r border-slate-100 align-top">
                         <div className="font-bold text-slate-900 text-base">{item.vendor_name}</div>
-                        <div className="text-xs text-slate-500 font-semibold mt-1 uppercase tracking-wider">Receipt: {item.receipt_no}</div>
+                        {claim.has_receipts !== false && (
+                          <div className="text-xs text-slate-500 font-semibold mt-1 uppercase tracking-wider">Receipt: {item.receipt_no}</div>
+                        )}
                         {item.remarks && <div className="mt-3 text-slate-600 italic border-l-2 border-slate-300 pl-3">"{item.remarks}"</div>}
                       </td>
 
                       {/* Amount Col */}
                       <td className="px-6 py-4 font-black text-right text-slate-900 border-r border-slate-100 bg-slate-50/50 align-top">
                         <span className="text-lg">{Number(item.claim_amount).toFixed(2)}</span>
-                        {item.is_foreign_currency && (
+                        {item.is_foreign_currency && claim.has_receipts !== false && (
                           <div className="text-[10px] font-bold text-amber-700 mt-2 bg-amber-100 inline-block px-2 py-1 rounded uppercase tracking-wider border border-amber-200">
                             Orig: {item.original_amount} {item.original_currency}
                           </div>
